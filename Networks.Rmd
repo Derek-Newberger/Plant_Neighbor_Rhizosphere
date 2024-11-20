@@ -1,0 +1,266 @@
+---
+title: "Network"
+author: "MD"
+date: "'r format(Sys.time(), '%b %d, %Y')'"
+output: 
+ html_document:
+   toc: true
+   toc_float: true
+   editor_options:
+     chunk_output_type: console
+   chunck_output_type: console
+   chunk_output_type: console
+---
+
+install packages load libraries and load data
+```{r}
+library(chorddiag) # interactive chord diagrams
+library(microeco) # statistical and plotting approaches in microbial community ecology
+library(igraph) # for network analysis
+library(rgexf) # to be exported to Gephi
+library(RColorBrewer)
+library(file2meco)
+library(phyloseq)
+```
+
+```{r}
+P.A <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_1/EMU.rel_abund.finalRhizoDD1.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_1/demultiplex_Rhizo_DD1.xlsx', 
+                       sheet='Rhizo1', range='A1:S97',
+                       sample_names='name',
+                       run_name='Rhizo1')
+
+P.B <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_2/EMU.rel_abund.finalRhizoDD2.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_2/demultiplex_Rhizo_DD2.xlsx', 
+                       sheet='Rhizo2', range='A1:S92',
+                       sample_names='name',
+                       run_name='Rhizo2')
+
+# merge all imported datasets
+P.rel <- merge_phyloseq(P.A, P.B)
+```
+
+```{r import2}
+# save combined relative abundance phyloseq object
+saveRDS(P.rel, '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+
+# convert EMU rel abundances to count data using final number of sequence reads
+P.count <- P.rel
+for (n in 1:nsamples(P.count)) {
+  otu_table(P.count)[,n] <- round(otu_table(P.count)[,n] * sample_data(P.count)$final[n], 0)
+}
+
+# save combined count phyloseq object
+saveRDS(P.count, '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+```
+
+Create microtable environmenat from phyloseq data
+```{r}
+rank <- 'species'
+P.glom <- tax_glom(P.count, taxrank=rank)
+tax_table(P.glom) <- tax_table(P.glom)[,1:7]
+taxa_names(P.glom) <- tax_table(P.glom)[,'species']
+
+dataset <- phyloseq2meco(P.glom)
+dataset
+
+dataset$tidy_dataset()
+dataset$sample_sums() %>% range
+dataset$cal_abund()
+dataset$save_abund(dirpath = "taxa_abund")
+
+
+#subset to include data for each domestication group
+group_W <- clone(dataset) #Whole Dataset
+
+group_A<- clone(dataset)
+group_A$sample_table <- subset(group_A$sample_table, Diversity == "A")
+group_A$tidy_dataset()
+group_A
+
+group_B <- clone(dataset)
+group_B$sample_table <- subset(group_B$sample_table, Diversity == "B")
+group_B$tidy_dataset()
+group_B
+
+group_F <- clone(dataset)
+group_F$sample_table <- subset(group_F$sample_table, Diversity == "F")
+group_F$tidy_dataset()
+group_F
+
+group_AP <- clone(dataset)
+group_AP$sample_table <- subset(group_AP$sample_table, Network == "AP")
+group_AP$tidy_dataset()
+group_AP
+
+group_BP <- clone(dataset)
+group_BP$sample_table <- subset(group_BP$sample_table, Network == "BP")
+group_BP$tidy_dataset()
+group_BP
+
+group_FP <- clone(dataset)
+group_FP$sample_table <- subset(group_FP$sample_table, Network == "FP")
+group_FP$tidy_dataset()
+group_FP
+
+```
+
+Generate networks for monocropping and grouped polycrop
+```{r}
+networkW <- trans_network$new(dataset = dataset, cor_method = "spearman", filter_thres = 0.001)
+networkW$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkW$cal_module(method = "cluster_fast_greedy")
+networkW$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/example.gexf")
+
+networkA <- trans_network$new(dataset = group_A, cor_method = "spearman", filter_thres = 0.001)
+networkA$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkA$cal_module(method = "cluster_fast_greedy")
+networkA$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Alfalfa.gexf")
+
+networkB <- trans_network$new(dataset = group_B, cor_method = "spearman", filter_thres = 0.001)
+networkB$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkB$cal_module(method = "cluster_fast_greedy")
+networkB$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Brassica.gexf")
+
+networkF <- trans_network$new(dataset = group_F, cor_method = "spearman", filter_thres = 0.001)
+networkF$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkF$cal_module(method = "cluster_fast_greedy")
+networkF$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Fescue.gexf")
+
+networkAP <- trans_network$new(dataset = group_AP, cor_method = "spearman", filter_thres = 0.001)
+networkAP$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkAP$cal_module(method = "cluster_fast_greedy")
+networkAP$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/AlfalfaP.gexf")
+
+networkBP <- trans_network$new(dataset = group_BP, cor_method = "spearman", filter_thres = 0.001)
+networkBP$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkBP$cal_module(method = "cluster_fast_greedy")
+networkBP$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/BrassicaP.gexf")
+
+networkFP <- trans_network$new(dataset = group_FP, cor_method = "spearman", filter_thres = 0.001)
+networkFP$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkFP$cal_module(method = "cluster_fast_greedy")
+networkFP$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/FescueP.gexf")
+```
+
+Create microtable environment from phyloseq data for polyculture separate
+```{r}
+group_Ab<- clone(dataset)
+group_Ab$sample_table <- subset(group_Ab$sample_table, Diversity == "Ab")
+group_Ab$tidy_dataset()
+group_Ab
+
+group_Af<- clone(dataset)
+group_Af$sample_table <- subset(group_Af$sample_table, Diversity == "Af")
+group_Af$tidy_dataset()
+group_Af
+
+group_Abf<- clone(dataset)
+group_Abf$sample_table <- subset(group_Abf$sample_table, Diversity == "Abf")
+group_Abf$tidy_dataset()
+group_Abf
+
+group_Ba<- clone(dataset)
+group_Ba$sample_table <- subset(group_Ba$sample_table, Diversity == "Ba")
+group_Ba$tidy_dataset()
+group_Ba
+
+group_Bf<- clone(dataset)
+group_Bf$sample_table <- subset(group_Bf$sample_table, Diversity == "Bf")
+group_Bf$tidy_dataset()
+group_Bf
+
+group_Baf<- clone(dataset)
+group_Baf$sample_table <- subset(group_Baf$sample_table, Diversity == "Baf")
+group_Baf$tidy_dataset()
+group_Baf
+
+group_Fa<- clone(dataset)
+group_Fa$sample_table <- subset(group_Fa$sample_table, Diversity == "Fa")
+group_Fa$tidy_dataset()
+group_Fa
+
+group_Fb<- clone(dataset)
+group_Fb$sample_table <- subset(group_Fb$sample_table, Diversity == "Fb")
+group_Fb$tidy_dataset()
+group_Fb
+
+group_Fab<- clone(dataset)
+group_Fab$sample_table <- subset(group_Fab$sample_table, Diversity == "Fab")
+group_Fab$tidy_dataset()
+group_Fab
+```
+
+Generate networks for each polycrop treatment grouped by density
+```{r}
+networkAb <- trans_network$new(dataset = group_Ab, cor_method = "spearman", filter_thres = 0.001)
+networkAb$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkAb$cal_module(method = "cluster_fast_greedy")
+networkAb$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Ab.gexf")
+
+networkAf <- trans_network$new(dataset = group_Af, cor_method = "spearman", filter_thres = 0.001)
+networkAf$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkAf$cal_module(method = "cluster_fast_greedy")
+networkAf$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Af.gexf")
+
+networkAbf <- trans_network$new(dataset = group_Abf, cor_method = "spearman", filter_thres = 0.001)
+networkAbf$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkAbf$cal_module(method = "cluster_fast_greedy")
+networkAbf$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Abf.gexf")
+
+networkBa <- trans_network$new(dataset = group_Ba, cor_method = "spearman", filter_thres = 0.001)
+networkBa$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkBa$cal_module(method = "cluster_fast_greedy")
+networkBa$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Ba.gexf")
+
+networkBf <- trans_network$new(dataset = group_Bf, cor_method = "spearman", filter_thres = 0.001)
+networkBf$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkBf$cal_module(method = "cluster_fast_greedy")
+networkBf$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Bf.gexf")
+
+networkBaf <- trans_network$new(dataset = group_Baf, cor_method = "spearman", filter_thres = 0.001)
+networkBaf$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkBaf$cal_module(method = "cluster_fast_greedy")
+networkBaf$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Baf.gexf")
+
+networkFa <- trans_network$new(dataset = group_Fa, cor_method = "spearman", filter_thres = 0.001)
+networkFa$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkFa$cal_module(method = "cluster_fast_greedy")
+networkFa$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Fa.gexf")
+
+networkFb <- trans_network$new(dataset = group_Fb, cor_method = "spearman", filter_thres = 0.001)
+networkFb$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkFb$cal_module(method = "cluster_fast_greedy")
+networkFb$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Fb.gexf")
+
+networkFab <- trans_network$new(dataset = group_Fab, cor_method = "spearman", filter_thres = 0.001)
+networkFab$cal_network(COR_p_thres = 0.01, COR_optimization = TRUE)
+networkFab$cal_module(method = "cluster_fast_greedy")
+networkFab$save_network(filepath = "/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/Fab.gexf")
+```
+
+
+```{r}
+print(networkFab)
+```
+
+Generate chord diagrams for each domesitication group
+```{r}
+networkW$cal_sum_links(taxa_level = "phylum")
+networkW$plot_sum_links(plot_pos = TRUE, plot_num = 10, color_values = brewer.pal(10, "Paired"))
+```
+
+```{r}
+networkA$cal_sum_links(taxa_level = "species")
+networkA$plot_sum_links(plot_pos = TRUE, plot_num = 10, color_values = brewer.pal(10, "Paired"))
+```
+
+```{r}
+networkB$cal_sum_links(taxa_level = "species")
+networkB$plot_sum_links(plot_pos = TRUE, plot_num = 10, color_values = brewer.pal(10, "Paired"))
+```
+
+```{r}
+networkF$cal_sum_links(taxa_level = "species")
+networkF$plot_sum_links(plot_pos = TRUE, plot_num = 10, color_values = brewer.pal(10, "Paired"))
+```

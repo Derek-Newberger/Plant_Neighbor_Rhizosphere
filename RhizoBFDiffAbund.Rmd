@@ -1,0 +1,786 @@
+---
+title: "Rhizosphere_DifferentialAbundance"
+author: "Derek Newberger"
+date: "7/24/2023"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, echo=FALSE, message=FALSE, warning=FALSE}
+library(devtools)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(metacoder)
+library(phyloseq)
+# library(MicEco)
+library(reticulate)
+library(RColorBrewer)
+library(readxl)
+library(tidyverse)
+library(vegan)
+library(ggrepel)
+```
+
+```{r libraryBiplot, echo=FALSE, message=FALSE, warning=FALSE}
+library(egg)
+library(SciViews)
+library(dunn.test)
+library(MASS)
+library(car)
+library(emmeans)
+library(multcomp)
+library(multcompView)
+library(knitr)
+library(BiocManager)
+library(DESeq2)
+library(locfit)
+library(microbiomeMarker)
+```
+
+```{r myFunctions_setup, echo=FALSE}
+source("myFunctions.R")
+# If functions not in the same directory as the .Rmd file, open manually and run the code manually
+```
+
+```{r}
+P.A <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_1/EMU.rel_abund.finalRhizoDD1.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_1/demultiplex_Rhizo_DD1.xlsx', 
+                       sheet='Rhizo1', range='A1:S97',
+                       sample_names='name',
+                       run_name='Rhizo1')
+
+P.B <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_2/EMU.rel_abund.finalRhizoDD2.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_2/demultiplex_Rhizo_DD2.xlsx', 
+                       sheet='Rhizo2', range='A1:S92',
+                       sample_names='name',
+                       run_name='Rhizo2')
+
+# merge all imported datasets
+P.rel <- merge_phyloseq(P.A, P.B)
+```
+
+```{r import2}
+# save combined relative abundance phyloseq object
+saveRDS(P.rel, '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+
+# convert EMU rel abundances to count data using final number of sequence reads
+P.count <- P.rel
+for (n in 1:nsamples(P.count)) {
+  otu_table(P.count)[,n] <- round(otu_table(P.count)[,n] * sample_data(P.count)$final[n], 0)
+}
+
+# save combined count phyloseq object
+saveRDS(P.count, '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countRAlfalfa <- subset_samples(P.count, Alfalfa == 'Alfalfa')
+
+colnames(tax_table(P.countRAlfalfa)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+A1vsA24 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "A24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm66 = data.frame(marker_table(A1vsA24))
+mm66$comparison = "A1vsA24"
+mm66$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsA24)
+```
+
+```{r}
+A1vsA48 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "A48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm67 = data.frame(marker_table(A1vsA48))
+mm67$comparison = "A1vsA48"
+mm67$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsA48)
+```
+
+```{r}
+A1vsAb1 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Ab1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm68 = data.frame(marker_table(A1vsAb1))
+mm68$comparison = "A1vsAb1"
+mm68$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAb1)
+```
+
+```{r}
+A1vsAf1 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Af1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm69 = data.frame(marker_table(A1vsAf1))
+mm69$comparison = "A1vsAf1"
+mm69$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAf1)
+```
+
+```{r}
+A1vsAbf1 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Abf1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm70 = data.frame(marker_table(A1vsAbf1))
+mm70$comparison = "A1vsAbf1"
+mm70$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAbf1)
+```
+
+```{r}
+A1vsAb24 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Ab24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm71 = data.frame(marker_table(A1vsAb24))
+mm71$comparison = "A1vsAb24"
+mm71$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAb24)
+```
+
+```{r}
+A1vsAf24 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Af24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm72 = data.frame(marker_table(A1vsAf24))
+mm72$comparison = "A1vsAf24"
+mm72$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAf24)
+```
+
+```{r}
+A1vsAbf24 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Abf24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm73 = data.frame(marker_table(A1vsAbf24))
+mm73$comparison = "A1vsAbf24"
+mm73$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAbf24)
+```
+
+```{r}
+A1vsAb48 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Ab48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm74 = data.frame(marker_table(A1vsAb48))
+mm74$comparison = "A1vsAb48"
+mm74$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAb48)
+```
+
+```{r}
+A1vsAf48 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Af48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm75 = data.frame(marker_table(A1vsAf48))
+mm75$comparison = "A1vsAf48"
+mm75$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAf48)
+```
+
+```{r}
+A1vsAbf48 <- microbiomeMarker::run_deseq2(
+           P.countRAlfalfa, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Abf48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm76 = data.frame(marker_table(A1vsAbf48))
+mm76$comparison = "A1vsAbf48"
+mm76$variety = "Alfalfa"
+```
+
+```{r}
+marker_table(A1vsAbf48)
+```
+
+```{r}
+density_AlfalfaPolyDRN = rbind(mm68, mm69, mm70, mm71, mm72, mm73, mm74, mm75, mm76) #mm68-76
+p10 <- ggplot(density_AlfalfaPolyDRN, aes(x = comparison, y = feature, fill = ef_logFC, na.rm = TRUE)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#0055FF", mid = "#FFFFFF", high = "#EA0000") +
+  labs(title = "Differential Abundance for Alfalfa Polyculture", x = "Comparison", y = "Species") +
+  guides(fill = guide_legend(title = "LogFC")) +
+ # scale_x_discrete(labels = c("B1vBa2", "B1vBa24","B1vBa48", "B1vBf2", "B1vBf24","B1vBaf3", "B1vBaf24", "B1vBaf48")) +
+  theme_minimal() +
+      theme(axis.text.y = element_text(size = 12)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p10  
+ggsave("density_AlfalfaPolyDRN.tiff", width = 22, height = 20, dpi = 300)
+```
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countRBrassica <- subset_samples(P.count, Brassica == 'Brassica')
+
+colnames(tax_table(P.countRBrassica)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+B1vsB24 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "B24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm44 = data.frame(marker_table(B1vsB24))
+mm44$comparison = "B1vsB24"
+mm44$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsB24)
+```
+
+```{r}
+B1vsB48 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "B48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm45 = data.frame(marker_table(B1vsB48))
+mm45$comparison = "B1vsB48"
+mm45$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsB48)
+```
+
+```{r}
+B1vsBa1 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Ba1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm46 = data.frame(marker_table(B1vsBa1))
+mm46$comparison = "B1vsBa1"
+mm46$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBa1)
+```
+
+```{r}
+B1vsBf1 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Bf1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm47 = data.frame(marker_table(B1vsBf1))
+mm47$comparison = "B1vsBf1"
+mm47$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBf1)
+```
+
+```{r}
+B1vsBaf1 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Baf1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm48 = data.frame(marker_table(B1vsBaf1))
+mm48$comparison = "B1vsBaf1"
+mm48$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBaf1)
+```
+
+```{r}
+B1vsBa24 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Ba24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm49 = data.frame(marker_table(B1vsBa24))
+mm49$comparison = "B1vsBa24"
+mm49$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBa24)
+```
+
+```{r}
+B1vsBf24 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Bf24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm50 = data.frame(marker_table(B1vsBf24))
+mm50$comparison = "B1vsBf24"
+mm50$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBf24)
+```
+
+```{r}
+B1vsBaf24 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Baf24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm51 = data.frame(marker_table(B1vsBaf24))
+mm51$comparison = "B1vsBaf24"
+mm51$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBaf24)
+```
+
+```{r}
+B1vsBa48 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Ba48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm52 = data.frame(marker_table(B1vsBa48))
+mm52$comparison = "B1vsBa48"
+mm52$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBa48)
+```
+
+```{r}
+B1vsBf48 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Bf48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm53 = data.frame(marker_table(B1vsBf48))
+mm53$comparison = "B1vsBf48"
+mm53$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBf48)
+```
+
+```{r}
+B1vsBaf48 <- microbiomeMarker::run_deseq2(
+           P.countRBrassica, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Baf48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm54 = data.frame(marker_table(B1vsBaf48))
+mm54$comparison = "B1vsBaf48"
+mm54$variety = "Brassica"
+```
+
+```{r}
+marker_table(B1vsBaf48)
+```
+
+```{r}
+density_BrassicaPolyDRN = rbind(mm46, mm47, mm48, mm49, mm50, mm51, mm52, mm53, mm54) #mm46-54
+p8 <- ggplot(density_BrassicaPolyDRN, aes(x = comparison, y = feature, fill = ef_logFC, na.rm = TRUE)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#0055FF", mid = "#FFFFFF", high = "#EA0000") +
+  labs(title = "Differential Abundance for Brassica Polyculture", x = "Comparison", y = "Species") +
+  guides(fill = guide_legend(title = "LogFC")) +
+ # scale_x_discrete(labels = c("B1vBa2", "B1vBa24","B1vBa48", "B1vBf2", "B1vBf24","B1vBaf3", "B1vBaf24", "B1vBaf48")) +
+  theme_minimal() +
+      theme(axis.text.y = element_text(size = 12)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p8  
+ggsave("density_BrassicaPolyDRN.tiff", width = 22, height = 20, dpi = 300)
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countRFescue <- subset_samples(P.count, Fescue == 'Fescue')
+
+colnames(tax_table(P.countRFescue)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+
+```{r}
+F1vsF24 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "F24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm55 = data.frame(marker_table(F1vsF24))
+mm55$comparison = "F1vsF24"
+mm55$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsF24)
+```
+
+```{r}
+F1vsF48 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "F48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm56 = data.frame(marker_table(F1vsF48))
+mm56$comparison = "F1vsF48"
+mm56$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsF48)
+```
+
+```{r}
+F1vsFa1 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fa1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm57 = data.frame(marker_table(F1vsFa1))
+mm57$comparison = "F1vsFa1"
+mm57$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsFa1)
+```
+
+```{r}
+F1vsFb1 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fb1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm58 = data.frame(marker_table(F1vsFb1))
+mm58$comparison = "F1vsFb1"
+mm58$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsFb1)
+```
+
+```{r}
+F1vsFab1 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fab1"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm59 = data.frame(marker_table(F1vsFab1))
+mm59$comparison = "F1vsFab1"
+mm59$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsFab1)
+```
+
+```{r}
+F1vsFa24 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fa24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm60 = data.frame(marker_table(F1vsFa24))
+mm60$comparison = "F1vsFa24"
+mm60$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsFa24)
+```
+
+```{r}
+F1vsFb24 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fb24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm61 = data.frame(marker_table(F1vsFb24))
+mm61$comparison = "F1vsFb24"
+mm61$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsFb24)
+```
+
+```{r}
+F1vsFab24 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fab24"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm62 = data.frame(marker_table(F1vsFab24))
+mm62$comparison = "F1vsFab24"
+mm62$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsFab24)
+```
+
+```{r}
+F1vsFa48 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fa48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm63 = data.frame(marker_table(F1vsFa48))
+mm63$comparison = "F1vsFa48"
+mm63$variety = "Fescue"
+           
+```
+
+```{r}
+marker_table(F1vsFa48)
+```
+
+```{r}
+F1vsFb48 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fb48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm64 = data.frame(marker_table(F1vsFb48))
+mm64$comparison = "F1vsFb48"
+mm64$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsFb48)
+```
+
+```{r}
+F1vsFab48 <- microbiomeMarker::run_deseq2(
+           P.countRFescue, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fab48"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+mm65 = data.frame(marker_table(F1vsFab48))
+mm65$comparison = "F1vsFab48"
+mm65$variety = "Fescue"
+```
+
+```{r}
+marker_table(F1vsFab48)
+```
+```{r}
+density_FescuePolyDRN = rbind(mm57,mm58,mm59, mm60, mm61, mm62, mm63, mm64, mm65) #mm57-65
+p9 <- ggplot(density_FescuePolyDRN, aes(x = comparison, y = feature, fill = ef_logFC, na.rm = TRUE)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#0055FF", mid = "#FFFFFF", high = "#EA0000") +
+  labs(title = "Differential Abundance for Fescue Polyculture", x = "Comparison", y = "Species") +
+  guides(fill = guide_legend(title = "LogFC")) +
+ # scale_x_discrete(labels = c("F1vFa2", "F1vFa24","F1vFa48", "F1vFb2", "F1vFb24","F1vFb48","F1vFab3", "F1vFab24","F1vFab48")) +
+  theme_minimal() +
+    theme(axis.text.y = element_text(size = 12)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p9
+ggsave("density_FescuePolyDRN.tiff", width = 12, height = 30, dpi = 300)
+```
+
+```{r}
+density_RhizoMonoDRN = rbind(mm66, mm67, mm44, mm45, mm55, mm56) #mm66-67 A, 44-45 B, 55-56 F
+p11 <- ggplot(density_RhizoMonoDRN, aes(x = comparison, y = feature, fill = ef_logFC, na.rm = TRUE)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#0055FF", mid = "#FFFFFF", high = "#EA0000") +
+  labs(title = "Differential Abundance for Monoculture", x = "Comparison", y = "Species") +
+  guides(fill = guide_legend(title = "LogFC")) +
+ # scale_x_discrete(labels = c("B1vBa2", "B1vBa24","B1vBa48", "B1vBf2", "B1vBf24","B1vBaf3", "B1vBaf24", "B1vBaf48")) +
+  theme_minimal() +
+      theme(axis.text.y = element_text(size = 12)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p11 
+ggsave("density_RhizoMonoDRN.tiff", width = 22, height = 20, dpi = 300)
+```

@@ -1,0 +1,2561 @@
+---
+title: "Rhizo_DD"
+author: "Derek Newberger"
+date: "6/12/2023"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, echo=FALSE, message=FALSE, warning=FALSE}
+library(devtools)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(metacoder)
+library(phyloseq)
+# library(MicEco)
+library(reticulate)
+library(RColorBrewer)
+library(readxl)
+library(tidyverse)
+library(vegan)
+library(ggrepel)
+library(pastecs)
+library(emmeans)
+```
+
+
+```{r library, echo=FALSE, message=FALSE, warning=FALSE}
+library(egg)
+library(SciViews)
+library(dunn.test)
+library(MASS)
+library(car)
+library(emmeans)
+library(multcomp)
+library(multcompView)
+library(knitr)
+library(BiocManager)
+library(DESeq2)
+library(locfit)
+library(microbiomeMarker)
+library(devtools)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(metacoder)
+library(phyloseq)
+library(reticulate)
+library(RColorBrewer)
+library(readxl)
+library(tidyverse)
+library(ggVennDiagram)
+```
+
+```{r setup, echo=FALSE}
+source("myFunctions.R")
+```
+
+```{r import}
+# use custom emu_to_phyloseq function to create phyl
+P.A <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_1/EMU.rel_abund.finalRhizoDD1.csv',
+                                              meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_1/demultiplex_Rhizo_DD1.xlsx', 
+                       sheet='Rhizo1', range='A1:R97',
+                       sample_names='name',
+                       run_name='demultiplexRhizo_DD1')
+
+P.B <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_2/EMU.rel_abund.finalRhizoDD2.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/Minion_RhizoDD_2/demultiplex_Rhizo_DD2.xlsx', 
+                       sheet='Rhizo2', range='A1:R92',
+                       sample_names='name',
+                       run_name='demultiplexRhizo_DD2')
+
+# merge all imported datasets
+P.relDenDiv <- merge_phyloseq(P.A, P.B)
+```
+
+```{r import2}
+# save combined relative abundance phyloseq object
+saveRDS(P.relDenDiv, '/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+
+# convert EMU rel abundances to count data using final number of sequence reads
+P.count <- P.relDenDiv
+for (n in 1:nsamples(P.count)) {
+  otu_table(P.count)[,n] <- round(otu_table(P.count)[,n] * sample_data(P.count)$final[n], 0)
+}
+
+# save combined count phyloseq object
+saveRDS(P.count, '/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.count.RDS')
+```
+
+## Control data
+
+```{r}
+# import phyloseq object created above
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.count.RDS')
+
+# select zymo controls only (count)
+P.zymos <- subset_samples(P.count, Type == 'Zymo') # type: sample, zymo, blank
+rich <- plot_richness(P.zymos, x="name", measures=c('Observed'))
+rich
+
+# select water controls only
+P.waters <- subset_samples(P.count, Type == 'PCR1')
+rich <- plot_richness(P.waters, x="name", measures=c('Observed')) 
+# Observed it literally a type of richness like Shannon
+rich
+
+# select CalEXn controls only
+P.calexn <- subset_samples(P.count, Type == 'CalEXn')
+rich <- plot_richness(P.calexn, x="name", measures=c('Observed')) 
+# Observed is literally a type of richness like Shannon
+rich
+```
+
+```{r rich sample data}
+# select soil samples only
+colnames(P.count)
+P.soils <- subset_samples(P.count, Type == 'Soil' & Density_Diversity != 'pre')
+P.soils
+
+# summary of sample reads
+summary(sample_sums(P.soils))
+
+# find a suitable cutoff for remove low-read samples
+cutoff <- quantile(sample_sums(P.soils), 0.1)
+cutoff
+
+# remove reads with low sequence numbers (< 1st quantile)
+P.soils <- prune_samples(sample_sums(P.soils) >= cutoff, P.soils)
+P.soils
+
+# richness unrarefied
+rich <- plot_richness(P.soils, x="name", measures=c('Observed'))
+gDF <- rich$data
+
+# richness rarefied
+P.rare <- rarefy_even_depth(P.soils, rngseed=TRUE)
+rich.rare <- plot_richness(P.rare, x="name", measures=c('Observed'))
+gDF.rare <- rich.rare$data
+```
+
+```{r}
+plot_richness(P.relDenDiv, # richness referes to species richness, rerun the first P.relDenDiv if you want the controls
+               x = "Density_Diversity",
+               measures = c("Shannon"), # shannon is a diversity index
+              color = ("Density"), # to see land use and aggregate size
+title = ("Shannon Index by Density and Diversity")) +
+  labs(x = "Density", 
+       color = "Density") +
+    geom_boxplot(aes(fill=Diversity))
+data(P.relDenDiv)
+```
+
+```{r}
+plot_richness(P.relDenDiv, # richness referes to species richness, rerun the first P.relDenDiv if you want the controls
+               x = "Diversity",
+               measures = c("Shannon"), # shannon is a diversity index
+              color = ("Density"), # to see land use and aggregate size
+title = ("Shannon index for densities and diversities")) +
+  labs(x = "Density", 
+       color = "Density") +
+    geom_boxplot(aes(fill=Diversity))
+```
+
+```{r}
+plot_richness(P.relDenDiv, # richness referes to species richness, rerun the first P.relDenDiv if you want the controls
+               x = "Density",
+               measures = c("Shannon"), # shannon is a diversity index
+              color = ("Diversity"), # to see land use and aggregate size
+title = ("Shannon index for densities, diversities, and controls")) +
+  labs(x = "Density") +
+    geom_point(aes(fill=Diversity))
+```
+## Principal Coordinates Analysis
+
+```{r pcoa data 1}
+P.relDenDiv <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relDenDiv <- subset_samples(P.relDenDiv, Type == 'Soil')
+
+# subset Alfalfa only
+#P.relDenDiv <- subset_samples(P.relDenDiv, Density == 48)
+
+# remove taxa with column sums = 0, Stopped working, says unsupported class: phyloseq but the function requires a phyloseq
+# P.relDenDiv = filter_taxa(P.relDenDiv, function(x) sum(x) > 0, TRUE)
+
+#P.relDenDiv <- tax_glom(P.relDenDiv, taxrank = "genus")
+
+# get meta data
+d <- data.frame(sample_data(P.relDenDiv))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relDenDiv)))
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='hellinger')
+
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density * Diversity, data=d)
+#ord <- dbrda(dist ~ 1, data=d)
+#summary(ord)
+
+# perMANOVA test
+adonis2(dist ~ Density * Diversity, data=d, perm=999, by="margin")
+#adonis2(dist ~ Diversity, data=d, perm=999)
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r pcoa fig 1, fig.width=11, fig.height=6, fig.cap="PCoA using species and Bray-Curtis distance."}
+# make graph
+p <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Diversity, shape=Density), color='black') +
+  geom_point(size=6) +
+  scale_fill_brewer(palette = 'Set3') +
+  scale_shape_manual(values=c(21,22,23)) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 12)))) + # change this number based on the error
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Density, level=0.95)) +
+  scale_color_brewer(palette = 'Set3') +
+  theme_dan()
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/PCoA.AllRhizoDDdata.Bray.pdf', width=11, height=6)
+```
+```{r}
+  mod <- betadisper(dist,d$Diversity)
+plot(mod, ellipse = TRUE, hull = F)
+mod
+```
+
+```{r}
+  mod <- betadisper(dist,d$Density)
+plot(mod, ellipse = TRUE, hull = F)
+mod
+```
+
+```{r}
+  mod <- betadisper(dist,d$Density_Diversity)
+plot(mod, ellipse = TRUE, hull = F)
+mod
+anova(mod)
+```
+
+```{r}
+df3 <- as.data.frame(mod$distances)
+df3$name <- rownames(df3)
+
+df4 <- read.csv("/Users/derek_newberger/Desktop/Beta_Disper.csv") %>% 
+  filter(., !is.na(mod.distances))
+
+mod <- lm(data=df4, mod.distances ~ Density*Diversity)
+par(mfrow=c(2,2))
+plot(mod)
+aov.mod <- aov(mod)
+summary(aov.mod)
+res <- emmeans(mod, list(pairwise ~Density), adjust='fdr')
+res
+groups <- data.frame(multcomp::cld(res[[1]],adjust='fdr'),
+                     Letters = c('abcdefghijklmnopqrstuvwxyz'),decreasing=F)
+
+library(agricolae)
+t <- HSD.test(mod, "Density");t
+
+df4 <- df4 %>% 
+  arrange(Density)
+
+xh <- rep("H", each=58) 
+xm <- rep("M",each=57)
+xl <- rep("L", each = 60)
+x <- c(xh,xl,xm)
+
+df4$letters <- x
+```
+
+```{r}
+d.sum <- summarize(group_by(df4, Diversity, Density,letters),
+                   n=n(),
+                   mean=mean(mod.distances),
+                   sd = sd(mod.distances),
+                   se = sd/sqrt(n))
+```
+
+```{r}
+betadisperFig <- ggplot(d.sum) +
+  geom_col(position=position_dodge(0.9),aes(x=Diversity, y = mean, fill=Density)) + 
+  geom_text(stat='identity',position=position_dodge(0.9),aes(x= Diversity, y=  mean + se, label = letters,color=Density),vjust=-1)+
+  geom_errorbar(position=position_dodge(0.9),aes(x=Diversity, ymin=mean-se,ymax=mean+se,color=Density),width=0.4)+
+  # scale_fill_brewer(palette = 'Paired')+
+  # scale_color_manual(values=c('black','black','black'))+
+    xlab("Plant Mixture") +
+  ylab("Beta Dispersion For Bacteriomes") +
+  # theme(legend.position="none")
+  theme_classic();betadisperFig
+```
+
+```{r}
+ggsave(betadisperFig, file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/betadisperFig.pdf', width=11, height=6)
+```
+
+```{r}
+df5 <- as.data.frame(mod$distances)
+df5$name <- rownames(df5)
+
+df6 <- read.csv("/Users/derek_newberger/Desktop/Beta_Disper.csv") %>% 
+  filter(., !is.na(mod.distances))
+
+mod <- lm(data=df6, mod.distances ~ Density*plantcount)
+par(mfrow=c(2,2))
+plot(mod)
+aov.mod <- aov(mod)
+summary(aov.mod)
+res <- emmeans(mod, list(pairwise ~Density), adjust='fdr')
+res
+groups <- data.frame(multcomp::cld(res[[1]],adjust='fdr'),
+                     Letters = c('abcdefghijklmnopqrstuvwxyz'),decreasing=F)
+
+library(agricolae)
+t <- HSD.test(mod, "Density");t
+
+df6 <- df6 %>% 
+  arrange(Density)
+
+xh <- rep("High", each=58) 
+xm <- rep("Meduim",each=57)
+xl <- rep("Low", each = 60)
+x <- c(xh,xl,xm)
+
+df6$letters <- x
+```
+
+```{r}
+d.sumPlanrcount <- summarize(group_by(df6, Density, plantcount,letters),
+                   n=n(),
+                   mean=mean(mod.distances),
+                   sd = sd(mod.distances),
+                   se = sd/sqrt(n))
+```
+
+```{r}
+p <- ggplot(d.sumPlanrcount) +
+  geom_col(position=position_dodge(0.9),aes(x=plantcount, y = mean, fill=Density)) + 
+  geom_text(stat='identity',position=position_dodge(0.9),aes(x= plantcount, y=  mean + se, label = letters,color=Density),vjust=-1)+
+  geom_errorbar(position=position_dodge(0.9),aes(x=plantcount, ymin=mean-se,ymax=mean+se,color=Density),width=0.4)+
+  # scale_fill_brewer(palette = 'Paired')+
+  # scale_color_manual(values=c('black','black','black'))+
+  xlab("Number of plant species") +
+  ylab("Beta Dispersion: Average distance to median for bacteriomes")
+  theme_classic();p
+```
+
+
+```{r pcoa fig 1, fig.width=11, fig.height=6, fig.cap="PCoA using species and Bray-Curtis distance."}
+# make graph
+p <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Diversity, shape=Density), color='black') +
+  geom_point(size=6) +
+  facet_grid(Diversity ~ Density) +
+  scale_fill_brewer(palette = 'Set3') +
+  scale_shape_manual(values=c(21,22,23)) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 12)))) + # change this number based on the error
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Density, level=0.95)) +
+  scale_color_brewer(palette = 'Set3') +
+  theme_dan()
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/PCoA.AllRhizoDDdata.Bray.pdf', width=11, height=6)
+```
+
+```{r pcoa fig 1, fig.width=11, fig.height=6, fig.cap="PCoA using species and Bray-Curtis distance."}
+# make graph
+p <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Diversity, shape=Density), color='black') +
+  geom_point(size=6) +
+  facet_grid(Density ~ Diversity) +
+  scale_fill_brewer(palette = 'Set3') +
+  scale_shape_manual(values=c(21,22,23)) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 12)))) + # change this number based on the error
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Density, level=0.95)) +
+  scale_color_brewer(palette = 'Set3') +
+  theme_dan()
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/PCoA.AllRhizoDDdata.Bray.pdf', width=11, height=6)
+```
+
+```{r pcoa fig 1, fig.width=11, fig.height=6, fig.cap="PCoA using species and Bray-Curtis distance."}
+# make graph
+AlfalfaOnly <- axes[axes$Diversity %in% c("A", "Af", "Ab", "Abf"), ]
+p <- ggplot(data=AlfalfaOnly, aes(x=Axis1, y=Axis2, fill=Diversity, shape=Density), color='black') +
+  geom_point(size=6) +
+  facet_grid(Density ~ .) +
+  scale_fill_brewer(palette = 'Set3') +
+  scale_shape_manual(values=c(21,22,23)) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 4)))) + # change this number based on the error
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+ #  stat_ellipse(aes(group=Diversity, color=Diversity, level=0.95), lwd=2) +
+  scale_color_brewer(palette = 'Set3') +
+  theme_dan()
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/PCoA.AllRhizoDDdata.Bray.pdf', width=11, height=6)
+```
+
+```{r pcoa fig 1, fig.width=11, fig.height=6, fig.cap="PCoA using species and Bray-Curtis distance."}
+# make graph
+BrassicaOnly <- axes[axes$Diversity %in% c("B", "Ba", "Baf", "Bf"), ]
+p <- ggplot(data=BrassicaOnly, aes(x=Axis1, y=Axis2, fill=Diversity, shape=Density), color='black') +
+  geom_point(size=6) +
+  facet_grid(Density ~ .) +
+  scale_fill_brewer(palette = 'Set3') +
+  scale_shape_manual(values=c(21,22,23)) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 4)))) + # change this number based on the error
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  # stat_ellipse(aes(group=Diversity, color=Diversity, level=0.95), lwd=2) +
+  scale_color_brewer(palette = 'Set3') +
+  theme_dan()
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/PCoA.AllRhizoDDdata.Bray.pdf', width=11, height=6)
+```
+
+```{r pcoa fig 1, fig.width=11, fig.height=6, fig.cap="PCoA using species and Bray-Curtis distance."}
+# make graph
+FescueOnly <- axes[axes$Diversity %in% c("F", "Fa", "Fab", "Fb"), ]
+p <- ggplot(data=FescueOnly, aes(x=Axis1, y=Axis2, fill=Diversity, shape=Density), color='black') +
+  geom_point(size=6) +
+  facet_grid(Density ~ .) +
+  scale_fill_brewer(palette = 'Set3') +
+  scale_shape_manual(values=c(21,22,23)) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 4)))) + # change this number based on the error
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Diversity, color=Diversity, level=0.95), lwd=1) +
+  scale_color_brewer(palette = 'Set3') +
+  theme_dan()
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/PCoA.AllRhizoDDdata.Bray.pdf', width=11, height=6)
+```
+
+
+
+```{r}
+P.relMonoA <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relMonoA <- subset_samples(P.relMonoA, Diversity == 'A')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relMonoA))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relMonoA)))
+# names(data) <- tax_table(P.relMonoA)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density, data=d)
+#summary(ord)
+
+# sppscores(ord) <- data
+# biplot <- data.frame(vegan::scores(ord, display='species'))
+# biplot <- biplot[abs(biplot$CAP1) > 0.2 | abs(biplot$CAP2) > 0.2, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density, data=d, perm=999, by="margin")
+mod <- betadisper(dist, d$Density)
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+# mult <- 6
+MonoAlfalfa <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Alfalfa')) +
+    scale_fill_manual(labels=c('1', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+# geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+# ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+# geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+MonoAlfalfa
+#ggsave(BipoltAlfalfa, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Alfalfa_#NonAutoclaved.pdf', width=11, height=6)
+```
+
+```{r}
+P.relMonoB <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relMonoB <- subset_samples(P.relMonoB, Diversity == 'B')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relMonoB))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relMonoB)))
+# names(data) <- tax_table(P.relMonoB)[,'species'] for biplot
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density, data=d)
+#summary(ord)
+
+# sppscores(ord) <- data
+# biplot <- data.frame(vegan::scores(ord, display='species'))
+# biplot <- biplot[abs(biplot$CAP1) > 0.1 | abs(biplot$CAP2) > 0.1, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density, data=d, perm=999, by="margin")
+mod <- betadisper(dist, d$Density)
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+# mult <- 6
+MonoBrassica <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Brassica')) +
+    scale_fill_manual(labels=c('1', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+# geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+# ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+# geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+MonoBrassica
+#ggsave(BipoltMonoBrassica, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/BipoltMonoBrassica.pdf', width=11, height=6)
+```
+
+```{r}
+P.relMonoF <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relMonoF <- subset_samples(P.relMonoF, Diversity == 'F')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relMonoF))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relMonoF)))
+# names(data) <- tax_table(P.relMonoF)[,'species'] for biplot
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density, data=d)
+#summary(ord)
+
+# sppscores(ord) <- data
+# biplot <- data.frame(vegan::scores(ord, display='species'))
+# biplot <- biplot[abs(biplot$CAP1) > 0.15 | abs(biplot$CAP2) > 0.15, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density, data=d, perm=999, by="margin")
+mod <- betadisper(dist, d$Density)
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+# mult <- 6
+MonoFescue <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Fescue')) +
+    scale_fill_manual(labels=c('1', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+# geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+# ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+# geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+MonoFescue
+#ggsave(BipoltAlfalfa, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Alfalfa_#NonAutoclaved.pdf', width=11, height=6)
+```
+
+```{r}
+P.relPolyABF <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relPolyABF <- subset_samples(P.relPolyABF, Diversity == 'Abf')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relPolyABF))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relPolyABF)))
+names(data) <- tax_table(P.relPolyABF)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density, data=d)
+#summary(ord)
+
+# sppscores(ord) <- data
+# biplot <- data.frame(vegan::scores(ord, display='species'))
+# biplot <- biplot[abs(biplot$CAP1) > 0.2 | abs(biplot$CAP2) > 0.2, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density, data=d, perm=999, by="margin")
+mod <- betadisper(dist, d$Density)
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+mult <- 6
+BipoltPolyABF <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Alfalfa, Brassica, and Fescue')) +
+    scale_fill_manual(labels=c('3', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    # geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+#ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+# geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+BipoltPolyABF
+#ggsave(BipoltAlfalfa, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Alfalfa_#NonAutoclaved.pdf', width=11, height=6)
+```
+
+```{r}
+P.relPolyBAF <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relPolyBAF <- subset_samples(P.relPolyBAF, Diversity == 'Baf')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relPolyBAF))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relPolyBAF)))
+names(data) <- tax_table(P.relPolyBAF)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density, data=d)
+#summary(ord)
+
+# sppscores(ord) <- data
+# biplot <- data.frame(vegan::scores(ord, display='species'))
+# biplot <- biplot[abs(biplot$CAP1) > 0.2 | abs(biplot$CAP2) > 0.2, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density, data=d, perm=999, by="margin")
+mod <- betadisper(dist, d$Density)
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+mult <- 6
+BipoltPolyBAF <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Alfalfa, Brassica, and Fescue')) +
+    scale_fill_manual(labels=c('3', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    # geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+#ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+# geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+BipoltPolyBAF
+#ggsave(BipoltAlfalfa, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Alfalfa_#NonAutoclaved.pdf', width=11, height=6)
+```
+
+```{r}
+P.relPolyFAB <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relPolyFAB <- subset_samples(P.relPolyFAB, Diversity == 'Fab')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relPolyFAB))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relPolyFAB)))
+names(data) <- tax_table(P.relPolyFAB)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density, data=d)
+#summary(ord)
+
+# sppscores(ord) <- data
+# biplot <- data.frame(vegan::scores(ord, display='species'))
+# biplot <- biplot[abs(biplot$CAP1) > 0.2 | abs(biplot$CAP2) > 0.2, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density, data=d, perm=999, by="margin")
+mod <- betadisper(dist, d$Density)
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+mult <- 6
+BipoltPolyFAB <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Alfalfa, Brassica, and Fescue')) +
+    scale_fill_manual(labels=c('3', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    # geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+#ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+# geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+BipoltPolyFAB
+#ggsave(BipoltAlfalfa, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Alfalfa_#NonAutoclaved.pdf', width=11, height=6)
+```
+
+```{r}
+P.relDenDivA <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relDenDivA <- subset_samples(P.relDenDivA, Alfalfa == 'Alfalfa')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relDenDivA))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relDenDivA)))
+# names(data) <- tax_table(P.relDenDivA)[,'species'] # this is for biplot
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density * Diversity, data=d)
+#summary(ord)
+
+# Optional Biplot
+sppscores(ord) <- data
+biplot <- data.frame(vegan::scores(ord, display='species'))
+biplot <- biplot[abs(biplot$CAP1) > 0.3 | abs(biplot$CAP2) > 0.3, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density * Diversity, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Density, d$Diversity))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+# mult <- 6  #this was for the biplot
+AlfalfaDD <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Alfalfa', 'Alfalfa and Brassica','Alfalfa, Brassica, and Fescue','Alfalfa and Fescue')) +
+    scale_fill_manual(labels=c('1', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+  #Next lines of code were for biplot
+geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+AlfalfaDD
+#ggsave(BipoltAlfalfa, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Alfalfa_#NonAutoclaved.pdf', width=11, height=6)
+```
+
+```{r}
+P.relDenDivB <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relDenDivB <- subset_samples(P.relDenDivB, Brassica == 'Brassica')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relDenDivB))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relDenDivB)))
+names(data) <- tax_table(P.relDenDivB)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density * Diversity, data=d)
+#summary(ord)
+
+sppscores(ord) <- data
+biplot <- data.frame(vegan::scores(ord, display='species'))
+biplot <- biplot[abs(biplot$CAP1) > 0.3 | abs(biplot$CAP2) > 0.3, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density * Diversity, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Density, d$Diversity))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+mult <- 6
+BipoltBrassicaDD <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Alfalfa and Brassica', 'Alfalfa, Brassica, and Fescue','Brassica', 'Brassica and Fescue')) +
+    scale_fill_manual(labels=c('1', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+BipoltBrassicaDD
+#ggsave(BipoltAlfalfa, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Alfalfa_#NonAutoclaved.pdf', width=11, height=6)
+```
+
+```{r}
+P.relDenDivF <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+P.relDenDivF <- subset_samples(P.relDenDivF, Fescue == 'Fescue')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relDenDivF))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relDenDivF)))
+names(data) <- tax_table(P.relDenDivF)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Density * Diversity, data=d)
+#summary(ord)
+
+sppscores(ord) <- data
+biplot <- data.frame(vegan::scores(ord, display='species'))
+biplot <- biplot[abs(biplot$CAP1) > 0.3 | abs(biplot$CAP2) > 0.3, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Density * Diversity, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Density, d$Diversity))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+mult <- 6
+BipoltFescueDD <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Density, shape=Diversity), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24), labels=c('Alfalfa, Brassica, and Fescue','Alfalfa and Fescue', 'Brassica and Fescue', 'Fescue')) +
+    scale_fill_manual(labels=c('1', '24','48'), values = c("1" = "indianred1",
+                               "24" = "gold",
+                               "48" = "green")) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 3)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Density)) +
+ labs(fill='Density') +
+ labs(shape='Diversity') +
+  theme_dan() +
+    xlim(-3.5,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+ggrepel::geom_text_repel(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+BipoltFescueDD
+#ggsave(BipoltAlfalfa, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Alfalfa_#NonAutoclaved.pdf', width=11, height=6)
+```
+
+```{r}
+# Load Data
+# myPath <- '/Users/derek_newberger/Desktop/Thesis_CSU/Density_Diversity/Minion_DD_1'
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.count.RDS')
+colnames(tax_table(P.count)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+# Subset Data
+P.soil <- subset_samples(P.count, Type == 'Soil') # soils only
+P.cycle <- subset_samples(P.soil, Diversity == 'A')
+
+
+myCrop <- 'A'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X1Plant",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'A'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X24Plants",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'A'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X48Plants",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+```
+
+```{r}
+# merge all marker tables and save
+gDFAlfalfaMono <- rbind(mm1, mm2, mm3)
+write.csv(gDFAlfalfaMono, paste('AlfalfaMono.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Density_Diversity/DD_R_Auto_Output/gDFAlfalfaMono.RDS'))
+```
+
+```{r}
+# Subset Data
+P.soil <- subset_samples(P.count, Type == 'Soil') # soils only
+P.cycle <- subset_samples(P.soil, Diversity == 'B')
+
+
+myCrop <- 'B'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X1Plant",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'B'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X24Plants",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'B'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X48Plants",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+```
+
+```{r}
+# merge all marker tables and save
+gDFBrassicaMono <- rbind(mm1, mm2, mm3)
+write.csv(gDFBrassicaMono, paste('BrassicaMono.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Density_Diversity/DD_R_Auto_Output/gDFBrassicaMono.RDS'))
+```
+
+```{r}
+# Subset Data
+P.soil <- subset_samples(P.count, Type == 'Soil') # soils only
+P.cycle <- subset_samples(P.soil, Diversity == 'F')
+
+
+myCrop <- 'F'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X1Plant",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'F'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X24Plants",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'F'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X48Plants",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+```
+
+```{r}
+# merge all marker tables and save
+gDFFescueMono <- rbind(mm1, mm2, mm3)
+write.csv(gDFFescueMono, paste('FescueMono.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Density_Diversity/DD_R_Auto_Output/gDFFescueMono.RDS'))
+```
+
+```{r}
+MonoAlfalfa1v24 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "A24"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoAlfalfa1v24)
+```
+
+```{r}
+MonoAlfalfa1v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "A48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoAlfalfa1v48)
+```
+
+```{r}
+MonoA1vAb1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Ab1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAb1)
+```
+
+```{r}
+MonoA1vAf1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Af1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAf1)
+```
+
+```{r}
+MonoA1vAbf1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Abf1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAbf1)
+```
+
+```{r}
+MonoA1vAb24 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Ab24"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAb24)
+```
+
+```{r}
+MonoA1vAf24 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Af24"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAf24)
+```
+
+```{r}
+MonoA1vAbf24 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Abf24"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAbf24)
+```
+
+```{r}
+MonoA1vAb48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Ab48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAb48)
+```
+
+```{r}
+MonoA1vAf48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Af48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAf48)
+```
+
+
+```{r}
+MonoA1vAbf48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("A1", "Abf48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoA1vAbf48)
+```
+
+```{r}
+MonoBrassica1v24 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "B24"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoBrassica1v24)
+```
+
+```{r}
+MonoBrassica1v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "B48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoBrassica1v48)
+```
+
+```{r}
+MonoBrassica24v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B24", "B48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoBrassica24v48)
+```
+
+```{r}
+MonoFescue1v24 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "F24"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoFescue1v24)
+```
+
+```{r}
+MonoFescue1v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "F48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoFescue1v48)
+```
+
+```{r}
+MonoFescue24v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F24", "F48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoFescue24v48)
+```
+
+```{r}
+AlfalfavOther <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Alfalfa",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Alfalfa", "Other"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(AlfalfavOther)
+```
+```{r}
+BrassicavOther <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Brassica",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Brassica", "Other"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(BrassicavOther)
+```
+
+```{r}
+FescuevOther <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Fescue",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fescue", "Other"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescuevOther)
+```
+
+
+```{r}
+FescueB1v24 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fb1", "Fb24"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescueB1v24)
+```
+
+```{r}
+FescueB1v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fb1", "Fb48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescueB1v48)
+```
+
+```{r}
+FescueB24v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fb24", "Fb48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescueB24v48)
+```
+
+```{r}
+# Subset Data
+P.soil <- subset_samples(P.count, Type == 'Soil') # soils only
+P.cycle <- subset_samples(P.soil, Diversity == 'Fa')
+
+
+myCrop <- 'Fa'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X1Plant",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'Fa'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X24Plants",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'Fa'
+P.crop <- subset_samples(P.cycle, Diversity == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "X48Plants",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+```
+
+```{r}
+# merge all marker tables and save
+gDFFescueFa <- rbind(mm1, mm2, mm3)
+write.csv(gDFFescueMono, paste('FescueMono.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Density_Diversity/DD_R_Auto_Output/gDFFescueA.RDS'))
+```
+
+```{r}
+FescueA1v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fa1", "Fa48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescueA1v48)
+```
+
+```{r}
+FescueA1v24 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fa1", "Fa24"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescueA1v24)
+```
+
+```{r}
+FescueA1v48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fa1", "Fa48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescueA1v48)
+```
+
+```{r}
+FescueTestv48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fa48", "Fb48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescueTestv48)
+```
+
+```{r}
+FescueTestv48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F48", "Fb48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(FescueTestv48)
+```
+
+```{r}
+Fa48vF48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fa48", "F48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Fa48vF48)
+```
+
+```{r}
+Fab48vF48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fab48", "F48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Fab48vF48)
+```
+
+```{r}
+Fab48vFa48 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fab48", "Fa48"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+MonoB1vBa1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Ba1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoB1vBa1)
+```
+
+```{r}
+MonoB1vBf1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Bf1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoB1vBf1)
+```
+
+```{r}
+MonoB1vBaf1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("B1", "Baf1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoB1vBaf1)
+```
+
+```{r}
+MonoF1vFa1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fa1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoF1vFa1)
+```
+
+
+```{r}
+MonoF1vFb1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fb1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoF1vFb1)
+```
+
+```{r}
+MonoF1vFab1 <- microbiomeMarker::run_deseq2(
+           P.count, 
+           group = "Density_Diversity",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("F1", "Fab1"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(MonoF1vFab1)
+```
+
+```{r maybe-neg-twotaxa-blue-fungi-daikonfewer-abundance-land-use-Order}
+plot_bar(P.count,
+         x = "Density_Diversity",
+         fill = "Order") +
+  geom_bar(aes(color = Order,
+               fill = Order),
+           stat = "identity",
+           position = "stack") +
+theme(legend.position = "NA") + # legend removed since it was distracting
+  xlab("Sample Material") +
+   ggtitle("Abundance of sequences by sample material by Order")
+```
+
+```{r}
+plot_bar(P.relDenDiv,
+         x = "Density_Diversity",
+         fill = "Order") +
+  geom_histogram(aes(color = Order,
+               fill = Order),
+           stat = "identity",
+           position = "stack") +
+theme(legend.position = "NA") + # legend removed since it was distracting
+  xlab("Sample Material") +
+   ggtitle("Abundance of sequences by sample material by Order")
+```
+```{r}
+plot_bar(P.relDenDiv,
+         x = "Density_Diversity",
+         fill = "Species") +
+  geom_histogram(aes(color = Species,
+               fill = Species),
+           stat = "identity",
+           position = "stack") +
+theme(legend.position = "NA") + # legend removed since it was distracting
+  xlab("Sample Material") +
+   ggtitle("Abundance of sequences by sample material by Species")
+```
+
+```{r}
+# Load Data
+P.relDenDiv <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Rhizo_Density_Diversity/RhizoDD_Output/P.relDenDiv.RDS')
+colnames(tax_table(P.relDenDiv)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Adhaeribacter swui'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Adhaeribacter swui')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Adhaeribacter swui`)) +
+  geom_boxplot(aes(fill=Density)) +
+  # facet_wrap(. ~ Soil_Treatment) +
+     labs(fill='Crop History')
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Pseudarthrobacter phenanthrenivorans'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Pseudarthrobacter phenanthrenivorans')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Pseudarthrobacter phenanthrenivorans`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Pseudarthrobacter sp. NIBRBAC000502771'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Pseudarthrobacter sp. NIBRBAC000502771')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Pseudarthrobacter sp. NIBRBAC000502771`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Adhaeribacter aerophilus'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Adhaeribacter aerophilus')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Adhaeribacter aerophilus`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Arthrobacter sp. KBS0702'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Arthrobacter sp. KBS0702')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Arthrobacter sp. KBS0702`)) +
+  geom_boxplot(aes(fill=Density)) +
+  coord_cartesian(ylim = c(0,0.008))+
+  geom_text(label = 'c', x = 1, y = 0.001, size = 5) + 
+  geom_text(label = 'a', x = 2, y = 0.0065, size = 5) +
+  geom_text(label = 'ab', x = 3, y = 0.006, size = 5) +
+  geom_text(label = 'bc', x = 4, y = 0.001, size = 5) +
+  geom_text(label = 'abc', x = 5, y = 0.003, size = 5) +
+  geom_text(label = 'abc', x = 6, y = 0.003, size = 5) +
+  geom_text(label = 'c', x = 7, y = 0.001, size = 5) +
+  geom_text(label = 'bc', x = 8, y = 0.002, size = 5) +
+  geom_text(label = 'abc', x = 9, y = 0.004, size = 5) +
+  geom_text(label = 'c', x = 10, y = 0.001, size = 5) +
+  geom_text(label = 'abc', x = 11, y = 0.0055, size = 5) +
+  geom_text(label = 'abc', x = 12, y = 0.002, size = 5);p
+
+  print(p)
+```
+
+```{r}
+mod <- df %>% 
+  lm(`Arthrobacter sp. KBS0702` ~ Density_Diversity, data = .)
+plot(mod)
+aov.mod <- aov(mod)
+summary(aov.mod)
+```
+
+```{r}
+library(emmeans)
+emmeans(mod, pairwise ~ Density)
+emmeans(mod, pairwise ~ Diversity)
+```
+
+```{r}
+library(agricolae)
+t <- HSD.test(mod, "Diversity"); t
+t <- HSD.test(mod, "Density_Diversity"); t
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Arthrobacter sp. UKPF54-2'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Arthrobacter sp. UKPF54-2')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Arthrobacter sp. UKPF54-2`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Arthrobacter sp. QXT-31'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Arthrobacter sp. QXT-31')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Arthrobacter sp. QXT-31`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Metabacillus indicus'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Metabacillus indicus')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Metabacillus indicus`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Planomicrobium chinense'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Planomicrobium chinense')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Planomicrobium chinense`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Azospirillum sp. TSA2s'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Azospirillum sp. TSA2s')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Azospirillum sp. TSA2s`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Flavisolibacter tropicus'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Flavisolibacter tropicus')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Flavisolibacter tropicus`)) +
+  geom_boxplot(aes(fill=Density))
+print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Adhaeribacter swui'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Adhaeribacter swui')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+mod <- df %>% 
+  lm(`Adhaeribacter swui` ~ Density_Diversity, data = .)
+plot(mod)
+aov.mod <- aov(mod)
+summary(aov.mod)
+```
+
+```{r}
+library(agricolae)
+t <- HSD.test(mod, "Diversity"); t
+t <- HSD.test(mod, "Density_Diversity"); t
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Pseudarthrobacter sp. NIBRBAC000502771'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Pseudarthrobacter sp. NIBRBAC000502771')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+mod <- df %>% 
+  lm(`Pseudarthrobacter sp. NIBRBAC000502771` ~ Density*Diversity, data = .)
+plot(mod)
+aov.mod <- aov(mod)
+summary(aov.mod)
+```
+
+```{r}
+library(car)
+outlierTest(mod) #this code can check for outliers
+```
+
+
+```{r}
+library(agricolae)
+t <- HSD.test(mod, "Density"); t
+t <- HSD.test(mod, "Density_Diversity"); t
+t <- HSD.test(mod, "Diversity"); t
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Pseudarthrobacter sp. NIBRBAC000502771`)) +
+  geom_boxplot(aes(fill=Density)) +
+  coord_cartesian(ylim = c(0,0.008))+
+  geom_text(label = 'a', x = 1, y = 0.001, size = 5) + 
+  geom_text(label = 'a', x = 2, y = 0.0065, size = 5) +
+  geom_text(label = 'a', x = 3, y = 0.006, size = 5) +
+  geom_text(label = 'a', x = 4, y = 0.001, size = 5) +
+  geom_text(label = 'a', x = 5, y = 0.003, size = 5) +
+  geom_text(label = 'a', x = 6, y = 0.003, size = 5) +
+  geom_text(label = 'a', x = 7, y = 0.001, size = 5) +
+  geom_text(label = 'a', x = 8, y = 0.002, size = 5) +
+  geom_text(label = 'a', x = 9, y = 0.004, size = 5) +
+  geom_text(label = 'a', x = 10, y = 0.001, size = 5) +
+  geom_text(label = 'a', x = 11, y = 0.0055, size = 5) +
+  geom_text(label = 'a', x = 12, y = 0.002, size = 5);p
+
+  print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Pseudarthrobacter phenanthrenivorans'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Pseudarthrobacter phenanthrenivorans')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+mod <- df %>% 
+  lm(`Pseudarthrobacter phenanthrenivorans` ~ Density*mnDiversity, data = .)
+plot(mod)
+aov.mod <- aov(mod)
+summary(aov.mod)
+```
+
+```{r}
+library(emmeans)
+emmeans(mod, pairwise ~ Density)
+emmeans(mod, pairwise ~ Diversity)
+```
+
+```{r}
+library(agricolae)
+t <- HSD.test(mod, "Density_Diversity"); t
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Arthrobacter sp. UKPF54-2'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Arthrobacter sp. UKPF54-2')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+mod <- df %>% 
+  lm(`Arthrobacter sp. UKPF54-2` ~ Density_Diversity, data = .)
+plot(mod)
+aov.mod <- aov(mod)
+summary(aov.mod)
+```
+
+```{r}
+library(agricolae)
+t <- HSD.test(mod, "Density_Diversity"); t
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Arthrobacter sp. UKPF54-2`)) +
+  geom_boxplot(aes(fill=Density)) +
+  coord_cartesian(ylim = c(0,0.008))+
+  geom_text(label = 'b', x = 1, y = 0.001, size = 5) + 
+  geom_text(label = 'ab', x = 2, y = 0.0075, size = 5) +
+  geom_text(label = 'a', x = 3, y = 0.0075, size = 5) +
+  geom_text(label = 'b', x = 4, y = 0.002, size = 5) +
+  geom_text(label = 'b', x = 5, y = 0.002, size = 5) +
+  geom_text(label = 'ab', x = 6, y = 0.002, size = 5) +
+  geom_text(label = 'b', x = 7, y = 0.001, size = 5) +
+  geom_text(label = 'b', x = 8, y = 0.0015, size = 5) +
+  geom_text(label = 'ab', x = 9, y = 0.0025, size = 5) +
+  geom_text(label = 'b', x = 10, y = 0.001, size = 5) +
+  geom_text(label = 'ab', x = 11, y = 0.002, size = 5) +
+  geom_text(label = 'ab', x = 12, y = 0.002, size = 5);p
+
+  print(p)
+```
+
+```{r}
+sample_data(P.relDenDiv)
+otu_table(P.relDenDiv)
+tax_table(P.relDenDiv)
+
+P.sub <- subset_samples(P.relDenDiv, Alfalfa == "Alfalfa")
+P.sub <- subset_taxa(P.sub, species %in% c('Arthrobacter sp. QXT-31'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Arthrobacter sp. QXT-31')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+mod <- df %>% 
+  lm(`Arthrobacter sp. QXT-31` ~ Density_Diversity, data = .)
+plot(mod)
+aov.mod <- aov(mod)
+summary(aov.mod)
+```
+
+```{r}
+library(agricolae)
+t <- HSD.test(mod, "Density_Diversity"); t
+```
+
+```{r}
+p <- ggplot(df, aes(x=Density_Diversity, y=`Arthrobacter sp. QXT-31`)) +
+  geom_boxplot(aes(fill=Density)) +
+  coord_cartesian(ylim = c(0,0.008))+
+  geom_text(label = 'c', x = 1, y = 0.001, size = 5) + 
+  geom_text(label = 'a', x = 2, y = 0.008, size = 5) +
+  geom_text(label = 'ab', x = 3, y = 0.005, size = 5) +
+  geom_text(label = 'c', x = 4, y = 0.0015, size = 5) +
+  geom_text(label = 'bc', x = 5, y = 0.002, size = 5) +
+  geom_text(label = 'bc', x = 6, y = 0.0025, size = 5) +
+  geom_text(label = 'c', x = 7, y = 0.0015, size = 5) +
+  geom_text(label = 'bc', x = 8, y = 0.0025, size = 5) +
+  geom_text(label = 'abc', x = 9, y = 0.0035, size = 5) +
+  geom_text(label = 'c', x = 10, y = 0.001, size = 5) +
+  geom_text(label = 'abc', x = 11, y = 0.003, size = 5) +
+  geom_text(label = 'bc', x = 12, y = 0.002, size = 5);p
+
+  print(p)
+```
+
+
